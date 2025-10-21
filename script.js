@@ -1,5 +1,5 @@
 // Mapbox Token
-mapboxgl.accessToken = 'pk.eyJ1IjoibmF6YXJpbWFtNCIsImEiOiJjbWdsOGw0YWUweXNxMm1xd2g3YzRzM3h3In0.NMgpIyHmbjM4cbdVtkq7IQ';
+mapboxgl.accessToken = 'pk.eyJ1IjoibmF6YXJpbWFtNCIsImEiOiJjbWdzY3A2dmUwcDE1MmtzMXB3dngyYjdtIn0.Vql7DCpJ_h79oFyW8U1QTw';
 
 // Initialize Map
 const map = new mapboxgl.Map({
@@ -35,6 +35,11 @@ const modalClose = document.getElementById('modal-close');
 const refreshBtn = document.getElementById('refresh-data');
 const resetViewBtn = document.getElementById('reset-view');
 const tokenHelpBtn = document.getElementById('token-help');
+
+// Search Elements
+const locationSearch = document.getElementById('location-search');
+const searchBtn = document.getElementById('search-btn');
+const searchSuggestions = document.getElementById('search-suggestions');
 
 // Current Layer State
 let currentAqiLayer = null;
@@ -203,6 +208,199 @@ function showTokenHelp() {
   alert('To get your AQI token:\n\n1. Visit https://aqicn.org/api/\n2. Sign up for a free account\n3. Get your token from the dashboard\n4. Paste it in the API Token field');
 }
 
+// Geocoding function to get coordinates from city name
+async function geocodeLocation(query) {
+  try {
+    // Using Mapbox Geocoding API
+    const response = await fetch(
+      `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxgl.accessToken}&limit=5`
+    );
+    
+    if (!response.ok) {
+      throw new Error('Geocoding request failed');
+    }
+    
+    const data = await response.json();
+    return data.features;
+  } catch (error) {
+    console.error('Geocoding error:', error);
+    return [];
+  }
+}
+
+// Search for location and navigate to it
+async function searchLocation(query) {
+  if (!query.trim()) {
+    return;
+  }
+  
+  updateStatus('Searching for location...', 'loading');
+  
+  try {
+    const results = await geocodeLocation(query);
+    
+    if (results.length === 0) {
+      updateStatus('Location not found. Try a different search term.', 'error');
+      return;
+    }
+    
+    // Use the first result
+    const location = results[0];
+    const [lng, lat] = location.center;
+    
+    // Navigate to the location
+    map.flyTo({
+      center: [lng, lat],
+      zoom: 10,
+      duration: 2000
+    });
+    
+    // Add a marker for the searched location
+    addSearchMarker(lng, lat, location.place_name);
+    
+    updateStatus(`Navigated to ${location.place_name}`, 'success');
+    updateLastUpdated();
+    
+  } catch (error) {
+    console.error('Search error:', error);
+    updateStatus('Search failed. Please try again.', 'error');
+  }
+}
+
+// Add marker for searched location
+function addSearchMarker(lng, lat, placeName) {
+  // Remove existing search marker
+  if (map.getLayer('search-marker')) {
+    map.removeLayer('search-marker');
+  }
+  if (map.getSource('search-marker')) {
+    map.removeSource('search-marker');
+  }
+  
+  // Add new marker
+  map.addSource('search-marker', {
+    type: 'geojson',
+    data: {
+      type: 'Feature',
+      geometry: {
+        type: 'Point',
+        coordinates: [lng, lat]
+      },
+      properties: {
+        title: placeName
+      }
+    }
+  });
+  
+  map.addLayer({
+    id: 'search-marker',
+    type: 'circle',
+    source: 'search-marker',
+    paint: {
+      'circle-color': '#ef4444',
+      'circle-radius': 8,
+      'circle-stroke-width': 3,
+      'circle-stroke-color': '#ffffff'
+    }
+  });
+  
+  // Add popup on click
+  map.on('click', 'search-marker', (e) => {
+    new mapboxgl.Popup({
+      className: 'custom-popup',
+      maxWidth: '300px'
+    })
+      .setLngLat(e.lngLat)
+      .setHTML(`
+        <div class="popup-content">
+          <h3><i class="fas fa-map-marker-alt"></i> ${placeName}</h3>
+          <div class="popup-info">
+            <div class="popup-item">
+              <i class="fas fa-search"></i>
+              <span>Searched Location</span>
+            </div>
+            <div class="popup-item">
+              <i class="fas fa-globe"></i>
+              <span>Coordinates: ${lat.toFixed(4)}, ${lng.toFixed(4)}</span>
+            </div>
+          </div>
+        </div>
+      `)
+      .addTo(map);
+  });
+  
+  // Change cursor on hover
+  map.on('mouseenter', 'search-marker', () => {
+    map.getCanvas().style.cursor = 'pointer';
+  });
+  
+  map.on('mouseleave', 'search-marker', () => {
+    map.getCanvas().style.cursor = '';
+  });
+}
+
+// Show search suggestions
+async function showSuggestions(query) {
+  if (query.length < 2) {
+    searchSuggestions.style.display = 'none';
+    return;
+  }
+  
+  try {
+    const results = await geocodeLocation(query);
+    
+    if (results.length === 0) {
+      searchSuggestions.style.display = 'none';
+      return;
+    }
+    
+    // Display suggestions
+    searchSuggestions.innerHTML = results.map(result => `
+      <div class="suggestion-item" data-lng="${result.center[0]}" data-lat="${result.center[1]}" data-name="${result.place_name}">
+        <i class="fas fa-map-marker-alt"></i>
+        <div class="suggestion-text">
+          <div class="suggestion-name">${result.place_name}</div>
+          <div class="suggestion-details">${result.context ? result.context.map(c => c.text).join(', ') : ''}</div>
+        </div>
+      </div>
+    `).join('');
+    
+    searchSuggestions.style.display = 'block';
+    
+    // Add click handlers to suggestions
+    searchSuggestions.querySelectorAll('.suggestion-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const lng = parseFloat(item.dataset.lng);
+        const lat = parseFloat(item.dataset.lat);
+        const name = item.dataset.name;
+        
+        locationSearch.value = name;
+        searchSuggestions.style.display = 'none';
+        
+        // Navigate to location
+        map.flyTo({
+          center: [lng, lat],
+          zoom: 10,
+          duration: 2000
+        });
+        
+        addSearchMarker(lng, lat, name);
+        updateStatus(`Navigated to ${name}`, 'success');
+        updateLastUpdated();
+      });
+    });
+    
+  } catch (error) {
+    console.error('Suggestions error:', error);
+    searchSuggestions.style.display = 'none';
+  }
+}
+
+// Hide suggestions when clicking outside
+function hideSuggestions() {
+  searchSuggestions.style.display = 'none';
+}
+
 // Event Listeners
 aqiTypeSelect.addEventListener('change', () => {
   addAqiLayer(aqiTypeSelect.value);
@@ -230,6 +428,28 @@ refreshBtn.addEventListener('click', () => {
 });
 resetViewBtn.addEventListener('click', resetMapView);
 tokenHelpBtn.addEventListener('click', showTokenHelp);
+
+// Search Event Listeners
+searchBtn.addEventListener('click', () => {
+  searchLocation(locationSearch.value);
+});
+
+locationSearch.addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') {
+    searchLocation(locationSearch.value);
+  }
+});
+
+locationSearch.addEventListener('input', (e) => {
+  showSuggestions(e.target.value);
+});
+
+// Hide suggestions when clicking outside
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.search-wrapper')) {
+    hideSuggestions();
+  }
+});
 
 // Close modal when clicking outside
 infoModal.addEventListener('click', (e) => {
