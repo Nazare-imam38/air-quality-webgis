@@ -1,19 +1,103 @@
+// Global map variables
+let currentMapType = 'mapbox'; // 'mapbox' or 'leaflet'
+let mapboxMap = null;
+let leafletMap = null;
+let currentMap = null;
+
+// Check if Mapbox is loaded
+if (typeof mapboxgl === 'undefined') {
+  console.error('Mapbox GL JS failed to load');
+  // Try to fallback to Leaflet
+  if (typeof L !== 'undefined') {
+    console.log('Falling back to Leaflet map');
+    currentMapType = 'leaflet';
+  } else {
+    document.getElementById('map').innerHTML = `
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; background: linear-gradient(135deg, #1e293b 0%, #334155 50%, #475569 100%); color: white; text-align: center; padding: 2rem;">
+        <h2 style="margin-bottom: 1rem;">⚠️ Map Libraries Failed to Load</h2>
+        <p style="margin-bottom: 1rem;">Please check your internet connection and try refreshing the page.</p>
+        <button onclick="window.location.reload()" style="padding: 0.75rem 1.5rem; background: #3b82f6; color: white; border: none; border-radius: 0.5rem; cursor: pointer;">Refresh Page</button>
+      </div>
+    `;
+    throw new Error('Both Mapbox and Leaflet failed to load');
+  }
+}
+
 // Mapbox Token
 mapboxgl.accessToken = 'pk.eyJ1IjoibmF6YXJpbWFtNCIsImEiOiJjbWdzY3A2dmUwcDE1MmtzMXB3dngyYjdtIn0.Vql7DCpJ_h79oFyW8U1QTw';
 
-// Initialize Map
-const map = new mapboxgl.Map({
-  container: 'map',
-  style: 'mapbox://styles/mapbox/streets-v11',
-  center: [0, 20],
-  zoom: 2
-});
+// Initialize Mapbox Map
+function initializeMapboxMap() {
+  try {
+    mapboxMap = new mapboxgl.Map({
+      container: 'map',
+      style: 'mapbox://styles/mapbox/satellite-streets-v12',
+      center: [0, 20],
+      zoom: 1.5,
+      projection: 'globe',
+      pitch: 0,
+      bearing: 0,
+      antialias: true,
+      preserveDrawingBuffer: true
+    });
 
-// Add error handling for map initialization
-map.on('error', (e) => {
-  console.error('Map error:', e);
-  updateStatus('Map initialization failed. Please check your internet connection.', 'error');
-});
+    // Add error handling for map initialization
+    mapboxMap.on('error', (e) => {
+      console.error('Mapbox error:', e);
+      updateStatus('Mapbox initialization failed. Please check your internet connection.', 'error');
+    });
+
+    // Add loading error handling
+    mapboxMap.on('loaderror', (e) => {
+      console.error('Mapbox load error:', e);
+      updateStatus('Failed to load Mapbox tiles. Check your connection.', 'error');
+    });
+
+    return mapboxMap;
+  } catch (error) {
+    console.error('Failed to initialize Mapbox:', error);
+    return null;
+  }
+}
+
+// Initialize Leaflet Map
+function initializeLeafletMap() {
+  try {
+    // Clear the map container first
+    const mapContainer = document.getElementById('map');
+    if (mapContainer) {
+      mapContainer.innerHTML = '';
+    }
+    
+    // Initialize immediately but add tiles after a short delay
+    leafletMap = L.map('map').setView([20, 0], 1.5);
+    
+    // Add OpenStreetMap tiles
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors',
+      maxZoom: 19
+    }).addTo(leafletMap);
+
+    return leafletMap;
+  } catch (error) {
+    console.error('Failed to initialize Leaflet:', error);
+    return null;
+  }
+}
+
+// Initialize the appropriate map
+function initializeMap() {
+  if (currentMapType === 'mapbox' && typeof mapboxgl !== 'undefined') {
+    currentMap = initializeMapboxMap();
+  } else if (currentMapType === 'leaflet' && typeof L !== 'undefined') {
+    currentMap = initializeLeafletMap();
+  } else {
+    console.error('No suitable map library available');
+    return null;
+  }
+  
+  return currentMap;
+}
 
 // DOM Elements
 const connectionStatus = document.getElementById('connection-status');
@@ -22,6 +106,8 @@ const tileStatusText = document.getElementById('tile-status-text');
 const aqiTypeSelect = document.getElementById('aqi-type');
 const aqiTokenInput = document.getElementById('aqi-token');
 const lastUpdated = document.getElementById('last-updated');
+const mapToggleBtn = document.getElementById('map-toggle-btn');
+const mapToggleText = document.getElementById('map-toggle-text');
 
 // UI Elements
 const panelToggle = document.getElementById('panel-toggle');
@@ -46,6 +132,114 @@ let currentAqiLayer = null;
 let isPanelCollapsed = false;
 let isLegendCollapsed = false;
 
+// Map switching functionality
+function switchMap() {
+  if (currentMapType === 'mapbox') {
+    // Switch to Leaflet
+    if (typeof L === 'undefined') {
+      updateStatus('Leaflet library not loaded. Cannot switch maps.', 'error');
+      return;
+    }
+    
+    // Store current view state
+    let center, zoom;
+    if (currentMap && currentMapType === 'mapbox') {
+      center = currentMap.getCenter();
+      zoom = currentMap.getZoom();
+    } else {
+      center = { lng: 0, lat: 20 };
+      zoom = 1.5;
+    }
+    
+    // Clear the map container
+    document.getElementById('map').innerHTML = '';
+    
+    // Switch to Leaflet
+    currentMapType = 'leaflet';
+    currentMap = initializeLeafletMap();
+    
+    if (currentMap) {
+      // Wait for Leaflet to be ready, then set view
+      setTimeout(() => {
+        if (currentMap && currentMap.setView) {
+          currentMap.setView([center.lat, center.lng], zoom);
+        }
+        mapToggleText.textContent = 'Mapbox';
+        updateStatus('Switched to Leaflet map', 'success');
+        
+        // Re-add AQI layer if it exists
+        if (currentAqiLayer) {
+          setTimeout(() => {
+            addAqiLayer(currentAqiLayer);
+          }, 200);
+        }
+      }, 200);
+    }
+  } else {
+    // Switch to Mapbox
+    if (typeof mapboxgl === 'undefined') {
+      updateStatus('Mapbox library not loaded. Cannot switch maps.', 'error');
+      return;
+    }
+    
+    // Store current view state
+    let center, zoom;
+    if (currentMap && currentMapType === 'leaflet') {
+      center = currentMap.getCenter();
+      zoom = currentMap.getZoom();
+    } else {
+      center = { lat: 20, lng: 0 };
+      zoom = 1.5;
+    }
+    
+    // Clear the map container
+    document.getElementById('map').innerHTML = '';
+    
+    // Switch to Mapbox
+    currentMapType = 'mapbox';
+    currentMap = initializeMapboxMap();
+    
+    if (currentMap) {
+      // Set the view to match previous map
+      currentMap.setCenter([center.lng, center.lat]);
+      currentMap.setZoom(zoom);
+      mapToggleText.textContent = 'Leaflet';
+      updateStatus('Switched to Mapbox map', 'success');
+      
+      // Re-add AQI layer if it exists
+      if (currentAqiLayer) {
+        addAqiLayer(currentAqiLayer);
+      }
+    }
+  }
+}
+
+// Helper function to add Mapbox layer
+function addMapboxLayer(layerType, token) {
+  try {
+    currentMap.addSource('air-quality-tiles', {
+      type: 'raster',
+      tiles: [
+        `https://tiles.aqicn.org/tiles/${layerType}/{z}/{x}/{y}.png?token=${token}`
+      ],
+      tileSize: 256
+    });
+
+    currentMap.addLayer({
+      id: 'air-quality-layer',
+      type: 'raster',
+      source: 'air-quality-tiles',
+      minzoom: 0,
+      maxzoom: 22,
+      paint: {
+        'raster-opacity': 0.8
+      }
+    });
+  } catch (error) {
+    console.error('Error adding Mapbox layer:', error);
+  }
+}
+
 // Test Tile Loading
 function testTileLoading(layerType, token) {
   return new Promise((resolve) => {
@@ -66,6 +260,11 @@ function testTileLoading(layerType, token) {
 
 // Add Air Quality Tile Layer with Error Handling
 async function addAqiLayer(layerType) {
+  if (!currentMap) {
+    updateStatus('Map not initialized. Please refresh the page.', 'error');
+    return;
+  }
+  
   const token = aqiTokenInput.value.trim();
   
   if (!token) {
@@ -86,33 +285,38 @@ async function addAqiLayer(layerType) {
     
     // Remove existing layer if it exists
     if (currentAqiLayer) {
-      if (map.getLayer('air-quality-layer')) {
-        map.removeLayer('air-quality-layer');
-      }
-      if (map.getSource('air-quality-tiles')) {
-        map.removeSource('air-quality-tiles');
+      if (currentMapType === 'mapbox') {
+        if (currentMap.getLayer('air-quality-layer')) {
+          currentMap.removeLayer('air-quality-layer');
+        }
+        if (currentMap.getSource('air-quality-tiles')) {
+          currentMap.removeSource('air-quality-tiles');
+        }
+      } else if (currentMapType === 'leaflet') {
+        if (currentMap.airQualityLayer && currentMap.hasLayer(currentMap.airQualityLayer)) {
+          currentMap.removeLayer(currentMap.airQualityLayer);
+        }
       }
     }
     
-    // Add new source and layer
-    map.addSource('air-quality-tiles', {
-      type: 'raster',
-      tiles: [
-        `https://tiles.aqicn.org/tiles/${layerType}/{z}/{x}/{y}.png?token=${token}`
-      ],
-      tileSize: 256
-    });
-
-    map.addLayer({
-      id: 'air-quality-layer',
-      type: 'raster',
-      source: 'air-quality-tiles',
-      minzoom: 0,
-      maxzoom: 22,
-      paint: {
-        'raster-opacity': 0.8
+    // Add new layer based on map type
+    if (currentMapType === 'mapbox') {
+      // Check if map is loaded before adding sources
+      if (!currentMap.isStyleLoaded()) {
+        currentMap.on('style.load', () => {
+          addMapboxLayer(layerType, token);
+        });
+      } else {
+        addMapboxLayer(layerType, token);
       }
-    });
+    } else if (currentMapType === 'leaflet') {
+      // Add Leaflet tile layer
+      currentMap.airQualityLayer = L.tileLayer(`https://tiles.aqicn.org/tiles/${layerType}/{z}/{x}/{y}.png?token=${token}`, {
+        attribution: 'Air Quality Data: AQICN.org',
+        opacity: 0.8,
+        maxZoom: 22
+      }).addTo(currentMap);
+    }
     
     currentAqiLayer = layerType;
     updateStatus('API connected successfully', 'success');
@@ -196,11 +400,22 @@ function hideInfoModal() {
 
 // Reset Map View
 function resetMapView() {
-  map.flyTo({
-    center: [0, 20],
-    zoom: 2,
-    duration: 1000
-  });
+  if (!currentMap) {
+    updateStatus('Map not initialized. Please refresh the page.', 'error');
+    return;
+  }
+  
+  if (currentMapType === 'mapbox') {
+    currentMap.flyTo({
+      center: [0, 20],
+      zoom: 1.5,
+      pitch: 0,
+      bearing: 0,
+      duration: 2000
+    });
+  } else if (currentMapType === 'leaflet') {
+    currentMap.setView([20, 0], 1.5);
+  }
 }
 
 // Show Token Help
@@ -211,17 +426,35 @@ function showTokenHelp() {
 // Geocoding function to get coordinates from city name
 async function geocodeLocation(query) {
   try {
-    // Using Mapbox Geocoding API
-    const response = await fetch(
-      `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxgl.accessToken}&limit=5`
-    );
-    
-    if (!response.ok) {
-      throw new Error('Geocoding request failed');
+    if (currentMapType === 'mapbox' && typeof mapboxgl !== 'undefined') {
+      // Using Mapbox Geocoding API
+      const response = await fetch(
+        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxgl.accessToken}&limit=5`
+      );
+      
+      if (!response.ok) {
+        throw new Error('Mapbox geocoding request failed');
+      }
+      
+      const data = await response.json();
+      return data.features;
+    } else {
+      // Using OpenStreetMap Nominatim API for Leaflet
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&addressdetails=1`
+      );
+      
+      if (!response.ok) {
+        throw new Error('Nominatim geocoding request failed');
+      }
+      
+      const data = await response.json();
+      return data.map(item => ({
+        center: [parseFloat(item.lon), parseFloat(item.lat)],
+        place_name: item.display_name,
+        context: item.address ? Object.values(item.address).slice(0, 3) : []
+      }));
     }
-    
-    const data = await response.json();
-    return data.features;
   } catch (error) {
     console.error('Geocoding error:', error);
     return [];
@@ -249,11 +482,17 @@ async function searchLocation(query) {
     const [lng, lat] = location.center;
     
     // Navigate to the location
-    map.flyTo({
-      center: [lng, lat],
-      zoom: 10,
-      duration: 2000
-    });
+    if (currentMapType === 'mapbox') {
+      currentMap.flyTo({
+        center: [lng, lat],
+        zoom: 8,
+        pitch: 45,
+        bearing: 0,
+        duration: 2500
+      });
+    } else if (currentMapType === 'leaflet') {
+      currentMap.setView([lat, lng], 8);
+    }
     
     // Add a marker for the searched location
     addSearchMarker(lng, lat, location.place_name);
@@ -269,74 +508,101 @@ async function searchLocation(query) {
 
 // Add marker for searched location
 function addSearchMarker(lng, lat, placeName) {
-  // Remove existing search marker
-  if (map.getLayer('search-marker')) {
-    map.removeLayer('search-marker');
-  }
-  if (map.getSource('search-marker')) {
-    map.removeSource('search-marker');
-  }
-  
-  // Add new marker
-  map.addSource('search-marker', {
-    type: 'geojson',
-    data: {
-      type: 'Feature',
-      geometry: {
-        type: 'Point',
-        coordinates: [lng, lat]
-      },
-      properties: {
-        title: placeName
+  if (currentMapType === 'mapbox') {
+    // Remove existing search marker
+    if (currentMap.getLayer('search-marker')) {
+      currentMap.removeLayer('search-marker');
+    }
+    if (currentMap.getSource('search-marker')) {
+      currentMap.removeSource('search-marker');
+    }
+    
+    // Add new marker
+    currentMap.addSource('search-marker', {
+      type: 'geojson',
+      data: {
+        type: 'Feature',
+        geometry: {
+          type: 'Point',
+          coordinates: [lng, lat]
+        },
+        properties: {
+          title: placeName
+        }
       }
-    }
-  });
-  
-  map.addLayer({
-    id: 'search-marker',
-    type: 'circle',
-    source: 'search-marker',
-    paint: {
-      'circle-color': '#ef4444',
-      'circle-radius': 8,
-      'circle-stroke-width': 3,
-      'circle-stroke-color': '#ffffff'
-    }
-  });
-  
-  // Add popup on click
-  map.on('click', 'search-marker', (e) => {
-    new mapboxgl.Popup({
-      className: 'custom-popup',
-      maxWidth: '300px'
-    })
-      .setLngLat(e.lngLat)
-      .setHTML(`
-        <div class="popup-content">
-          <h3><i class="fas fa-map-marker-alt"></i> ${placeName}</h3>
-          <div class="popup-info">
-            <div class="popup-item">
-              <i class="fas fa-search"></i>
-              <span>Searched Location</span>
-            </div>
-            <div class="popup-item">
-              <i class="fas fa-globe"></i>
-              <span>Coordinates: ${lat.toFixed(4)}, ${lng.toFixed(4)}</span>
+    });
+    
+    currentMap.addLayer({
+      id: 'search-marker',
+      type: 'circle',
+      source: 'search-marker',
+      paint: {
+        'circle-color': '#ef4444',
+        'circle-radius': 8,
+        'circle-stroke-width': 3,
+        'circle-stroke-color': '#ffffff'
+      }
+    });
+    
+    // Add popup on click
+    currentMap.on('click', 'search-marker', (e) => {
+      new mapboxgl.Popup({
+        className: 'custom-popup',
+        maxWidth: '300px'
+      })
+        .setLngLat(e.lngLat)
+        .setHTML(`
+          <div class="popup-content">
+            <h3><i class="fas fa-map-marker-alt"></i> ${placeName}</h3>
+            <div class="popup-info">
+              <div class="popup-item">
+                <i class="fas fa-search"></i>
+                <span>Searched Location</span>
+              </div>
+              <div class="popup-item">
+                <i class="fas fa-globe"></i>
+                <span>Coordinates: ${lat.toFixed(4)}, ${lng.toFixed(4)}</span>
+              </div>
             </div>
           </div>
+        `)
+        .addTo(currentMap);
+    });
+    
+    // Change cursor on hover
+    currentMap.on('mouseenter', 'search-marker', () => {
+      currentMap.getCanvas().style.cursor = 'pointer';
+    });
+    
+    currentMap.on('mouseleave', 'search-marker', () => {
+      currentMap.getCanvas().style.cursor = '';
+    });
+  } else if (currentMapType === 'leaflet') {
+    // Remove existing search marker
+    if (currentMap.searchMarker) {
+      currentMap.removeLayer(currentMap.searchMarker);
+    }
+    
+    // Add new marker
+    currentMap.searchMarker = L.marker([lat, lng]).addTo(currentMap);
+    
+    // Add popup
+    currentMap.searchMarker.bindPopup(`
+      <div class="popup-content">
+        <h3><i class="fas fa-map-marker-alt"></i> ${placeName}</h3>
+        <div class="popup-info">
+          <div class="popup-item">
+            <i class="fas fa-search"></i>
+            <span>Searched Location</span>
+          </div>
+          <div class="popup-item">
+            <i class="fas fa-globe"></i>
+            <span>Coordinates: ${lat.toFixed(4)}, ${lng.toFixed(4)}</span>
+          </div>
         </div>
-      `)
-      .addTo(map);
-  });
-  
-  // Change cursor on hover
-  map.on('mouseenter', 'search-marker', () => {
-    map.getCanvas().style.cursor = 'pointer';
-  });
-  
-  map.on('mouseleave', 'search-marker', () => {
-    map.getCanvas().style.cursor = '';
-  });
+      </div>
+    `).openPopup();
+  }
 }
 
 // Show search suggestions
@@ -378,11 +644,17 @@ async function showSuggestions(query) {
         searchSuggestions.style.display = 'none';
         
         // Navigate to location
-        map.flyTo({
-          center: [lng, lat],
-          zoom: 10,
-          duration: 2000
-        });
+        if (currentMapType === 'mapbox') {
+          currentMap.flyTo({
+            center: [lng, lat],
+            zoom: 8,
+            pitch: 45,
+            bearing: 0,
+            duration: 2500
+          });
+        } else if (currentMapType === 'leaflet') {
+          currentMap.setView([lat, lng], 8);
+        }
         
         addSearchMarker(lng, lat, name);
         updateStatus(`Navigated to ${name}`, 'success');
@@ -420,6 +692,7 @@ legendToggle.addEventListener('click', toggleLegend);
 fullscreenBtn.addEventListener('click', toggleFullscreen);
 infoBtn.addEventListener('click', showInfoModal);
 modalClose.addEventListener('click', hideInfoModal);
+mapToggleBtn.addEventListener('click', switchMap);
 refreshBtn.addEventListener('click', () => {
   if (aqiTypeSelect.value) {
     addAqiLayer(aqiTypeSelect.value);
@@ -469,49 +742,111 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// Initialize the map
+currentMap = initializeMap();
+
 // Initial Load
-map.on('load', () => {
-  // Add default layer
-  addAqiLayer(aqiTypeSelect.value);
-  updateLastUpdated();
-  
-  // Add click interaction
-  map.on('click', (e) => {
-    new mapboxgl.Popup({
-      className: 'custom-popup',
-      maxWidth: '300px'
-    })
-      .setLngLat(e.lngLat)
-      .setHTML(`
-        <div class="popup-content">
-          <h3><i class="fas fa-map-marker-alt"></i> Location Details</h3>
-          <div class="popup-info">
-            <div class="popup-item">
-              <i class="fas fa-globe"></i>
-              <span>Coordinates: ${e.lngLat.lat.toFixed(4)}, ${e.lngLat.lng.toFixed(4)}</span>
-            </div>
-            <div class="popup-item">
-              <i class="fas fa-layer-group"></i>
-              <span>Layer: ${currentAqiLayer || 'None'}</span>
-            </div>
-            <div class="popup-item">
-              <i class="fas fa-clock"></i>
-              <span>Updated: ${new Date().toLocaleTimeString()}</span>
+if (currentMap) {
+  if (currentMapType === 'mapbox') {
+    currentMap.on('load', () => {
+    // Add 3D globe effects
+    currentMap.setFog({
+      'color': 'rgb(186, 210, 235)',
+      'high-color': 'rgb(36, 92, 223)',
+      'space-color': 'rgb(11, 11, 25)',
+      'star-intensity': 0.6
+    });
+
+    // Add atmosphere effect
+    currentMap.setFog({
+      'color': 'rgb(186, 210, 235)',
+      'high-color': 'rgb(36, 92, 223)',
+      'space-color': 'rgb(11, 11, 25)',
+      'star-intensity': 0.6
+    });
+
+    // Add default layer
+    addAqiLayer(aqiTypeSelect.value);
+    updateLastUpdated();
+    
+    // Add click interaction
+    currentMap.on('click', (e) => {
+      new mapboxgl.Popup({
+        className: 'custom-popup',
+        maxWidth: '300px'
+      })
+        .setLngLat(e.lngLat)
+        .setHTML(`
+          <div class="popup-content">
+            <h3><i class="fas fa-map-marker-alt"></i> Location Details</h3>
+            <div class="popup-info">
+              <div class="popup-item">
+                <i class="fas fa-globe"></i>
+                <span>Coordinates: ${e.lngLat.lat.toFixed(4)}, ${e.lngLat.lng.toFixed(4)}</span>
+              </div>
+              <div class="popup-item">
+                <i class="fas fa-layer-group"></i>
+                <span>Layer: ${currentAqiLayer || 'None'}</span>
+              </div>
+              <div class="popup-item">
+                <i class="fas fa-clock"></i>
+                <span>Updated: ${new Date().toLocaleTimeString()}</span>
+              </div>
             </div>
           </div>
-        </div>
-      `)
-      .addTo(map);
-  });
-  
-  // Monitor tile loading errors
-  map.on('error', (e) => {
-    if (e.error && e.error.status === 404) {
-      tileStatusText.textContent = 'Tile loading failed';
-      tileStatusText.className = 'error-status';
-    }
-  });
-});
+        `)
+        .addTo(currentMap);
+    });
+    
+    // Monitor tile loading errors
+    currentMap.on('error', (e) => {
+      if (e.error && e.error.status === 404) {
+        tileStatusText.textContent = 'Tile loading failed';
+        tileStatusText.className = 'error-status';
+      }
+    });
+    });
+  } else if (currentMapType === 'leaflet') {
+    // Wait for Leaflet to be ready
+    setTimeout(() => {
+      // Add default layer for Leaflet
+      addAqiLayer(aqiTypeSelect.value);
+      updateLastUpdated();
+      
+      // Add click interaction for Leaflet
+      currentMap.on('click', (e) => {
+      const lat = e.latlng.lat;
+      const lng = e.latlng.lng;
+      
+      L.popup({
+        className: 'custom-popup',
+        maxWidth: 300
+      })
+        .setLatLng([lat, lng])
+        .setContent(`
+          <div class="popup-content">
+            <h3><i class="fas fa-map-marker-alt"></i> Location Details</h3>
+            <div class="popup-info">
+              <div class="popup-item">
+                <i class="fas fa-globe"></i>
+                <span>Coordinates: ${lat.toFixed(4)}, ${lng.toFixed(4)}</span>
+              </div>
+              <div class="popup-item">
+                <i class="fas fa-layer-group"></i>
+                <span>Layer: ${currentAqiLayer || 'None'}</span>
+              </div>
+              <div class="popup-item">
+                <i class="fas fa-clock"></i>
+                <span>Updated: ${new Date().toLocaleTimeString()}</span>
+              </div>
+            </div>
+          </div>
+        `)
+        .openOn(currentMap);
+      });
+    }, 300);
+  }
+}
 
 // Add custom popup styles
 const popupStyles = `

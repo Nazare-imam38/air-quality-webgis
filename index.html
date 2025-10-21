@@ -3,13 +3,38 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Real-time global air quality monitoring with interactive map visualization">
+  <meta name="robots" content="index, follow">
   <title>Air Quality Monitor - Real-time Global AQI</title>
   <link rel="icon" type="image/x-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌬️</text></svg>">
-  <script src='https://api.mapbox.com/mapbox-gl-js/v2.9.2/mapbox-gl.js'></script>
-  <link href='https://api.mapbox.com/mapbox-gl-js/v2.9.2/mapbox-gl.css' rel='stylesheet' />
+  <script src='https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js' crossorigin='anonymous' onerror="handleMapboxError()"></script>
+  <link href='https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css' rel='stylesheet' crossorigin='anonymous' />
+  <!-- Leaflet CSS and JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous" onerror="handleLeafletError()"></script>
+  <script>
+    function handleMapboxError() {
+      console.error('Failed to load Mapbox from CDN');
+      document.getElementById('map').innerHTML = `
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; background: linear-gradient(135deg, #1e293b 0%, #334155 50%, #475569 100%); color: white; text-align: center; padding: 2rem;">
+          <h2 style="margin-bottom: 1rem;">⚠️ Mapbox CDN Failed to Load</h2>
+          <p style="margin-bottom: 1rem;">Unable to load Mapbox from CDN. This might be due to network issues or CORS restrictions.</p>
+          <button onclick="window.location.reload()" style="padding: 0.75rem 1.5rem; background: #3b82f6; color: white; border: none; border-radius: 0.5rem; cursor: pointer;">Retry</button>
+        </div>
+      `;
+    }
+    
+    function handleLeafletError() {
+      console.error('Failed to load Leaflet from CDN');
+      // Leaflet error handling will be managed in the main script
+    }
+  </script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="preconnect" href="https://api.mapbox.com">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preload" href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js" as="script">
+  <link rel="preload" href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" as="style">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
@@ -24,6 +49,10 @@
         <h1>Air Quality Monitor</h1>
       </div>
       <div class="header-actions">
+        <button class="btn-secondary" id="map-toggle-btn" title="Switch between Mapbox and Leaflet">
+          <i class="fas fa-map"></i>
+          <span id="map-toggle-text">Leaflet</span>
+        </button>
         <button class="btn-secondary" id="fullscreen-btn">
           <i class="fas fa-expand"></i>
         </button>
